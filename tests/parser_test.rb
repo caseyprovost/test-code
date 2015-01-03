@@ -7,7 +7,14 @@ class TestParser < Minitest::Test
   end
 
   def test_call
-    assert_equal true, @parser.call
+    start_time  = Time.now
+    result = @parser.call
+    # measure the performance of parsing and writing to CSV
+    elapsed_time = ((Time.now - start_time)).to_i
+    raise "#{start_time} #{Time.now}".inspect
+    raise elapsed_time.inspect
+
+    assert_equal true, result
   end
 
   # def test_that_it_will_not_blend
