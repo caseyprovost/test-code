@@ -7,21 +7,11 @@ class TestParser < Minitest::Test
   end
 
   def test_call
-    start_time  = Time.now
+    # output the performance results of parsing a file
+    require "benchmark"
+    puts Benchmark.measure{Parser.new(File.join(File.dirname(__FILE__), '..', 'fixtures/test_file.out')).call}
+
     result = @parser.call
-    # measure the performance of parsing and writing to CSV
-    elapsed_time = ((Time.now - start_time)).to_i
-    raise "#{start_time} #{Time.now}".inspect
-    raise elapsed_time.inspect
-
-    assert_equal true, result
-  end
-
-  # def test_that_it_will_not_blend
-  #   refute_match /^no/i, @meme.will_it_blend?
-  # end
-
-  def test_that_will_be_skipped
-    skip "test this later"
+    assert File.exists?(result)
   end
 end

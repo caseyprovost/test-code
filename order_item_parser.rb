@@ -1,7 +1,7 @@
 # This class is used to parser an order item.
 # It calculates all of it's totals based on the contained XML
 class OrderItemParser
-  attr_reader :shipping, :tax, :subtotal
+  attr_reader :shipping, :tax, :subtotal, :discount
 
   # Constructs a new instance of the OrderItemParser class
   # @param order_item [String] XML representation of an order item
@@ -18,6 +18,7 @@ class OrderItemParser
     @tax = 0.00
     @shipping = 0.00
     @subtotal = 0.00
+    @discount = 0.00
 
     quantity = @order_item.xpath("//Quantity").first.content.to_i
     components = @order_item.xpath("//Component")
@@ -31,8 +32,14 @@ class OrderItemParser
 
     # There appears to only be shipping promtions
     if promotions.any?
-      shipping_promotion = promotions.xpath('//ShipPromotionDiscount').map{ |node| node.content.to_f }.inject{|sum, amount| sum + amount }
-      @shipping =- shipping_promotion
+      shipping_promotion = promotions.xpath('//ShipPromotionDiscount').map{ |node| node.content.to_f }.inject{ |sum, amount| sum + amount }
+      @discount =+ (shipping_promotion * quantity)
+    end
+
+    if @tax < 0.00 || @shipping < 0.00 || @subtotal < 0.00
+      # code to help debug
+      # raise @order_item.to_xml.inspect
+      raise StandardError.new("order item has a negative value for tax or shipping or subtotal")
     end
 
     @parsed = true
@@ -48,23 +55,27 @@ class OrderItemParser
     subtotal = 0.00
 
     components.each do |component|
-      type = component.xpath("//Type").first.content
+      type = component.css('Type').first.content
 
       case type
       when 'Principal'
-        component.xpath("//Amount").each do |amount|
+        component.css("Amount").each do |amount|
           subtotal += amount.content.to_f
         end
       when 'GiftWrap'
-        component.xpath("//Amount").each do |amount|
+        component.css("Amount").each do |amount|
           subtotal += amount.content.to_f
         end
       when 'Shipping'
-        component.xpath("//Amount").each do |amount|
+        component.css("Amount").each do |amount|
           shipping += amount.content.to_f
         end
       when 'Tax'
-        component.xpath("//Amount").each do |amount|
+        component.css("Amount").each do |amount|
+          tax += amount.content.to_f
+        end
+      when 'GiftWrapTax'
+        component.css("Amount").each do |amount|
           tax += amount.content.to_f
         end
       else

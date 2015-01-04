@@ -6,9 +6,12 @@ require File.join(File.dirname(__FILE__), 'order_item_parser')
 # Code Test Instructions:
 # * Write a ruby script/program that can parse this Amazon XML file (faster and smaller memory usage is always best).
 # * Save each order as a row in a csv file or database table.
+#
+# TODO: It may be possible to receive a file with hundreds or thousands of orders. So we may need to batch this process.
 
 # This class is used to parse an order XML file.
 class Parser
+  attr_reader :result_file_path
   class NoFileFound < StandardError; end
 
   BATCH_SIZE = 100
@@ -18,13 +21,15 @@ class Parser
   def initialize(path)
     @file_path = path
     raise NoFileFound unless File.exists?(@file_path)
+    unless Dir.exist?(File.join(File.dirname(__FILE__), 'results'))
+      raise "Please create a results directory in the project root."
+    end
 
     @result_file_path = File.join(File.dirname(__FILE__), 'results', "parsed_orders_#{SecureRandom.hex}.csv")
   end
 
   def call
     correct_xml_file if file_line_count < 10
-    batch_count = (order_count.to_f / BATCH_SIZE).ceil
     line_number = 0
 
     f = File.open(File.path(@file_path), 'r')
@@ -38,10 +43,9 @@ class Parser
     result_file = File.open(@result_file_path, 'wb+')
     result_file.close
 
-    #appender = CsvAppender.new(@result_file_path)
-
+    # The default here is writing the results to a csv but this could easily be exchanged for writing to a DB.
     CSV.open(@result_file_path, 'wb+') do |csv|
-      csv << ['OrderID', 'Purchase Date', 'Order Status', 'Last Updated', 'Items', 'Subtotal', 'Tax', 'Shipping', 'Discounts', 'Total Paid', 'Shipping Address', 'Fullfillment Info']
+      csv << ['OrderID', 'Purchase Date', 'Order Status', 'Last Updated', 'Items', 'Subtotal', 'Tax', 'Shipping', 'Discounts', 'Total Paid', 'Shipping Address', 'Fullfillment Channel', 'Shipping Service Level']
 
       order_count.times do |i|
         xml_order = Nokogiri.XML(build_order(f))
@@ -50,7 +54,17 @@ class Parser
         order_status = xml_order.xpath("//OrderStatus").first.content
         sales_channel = xml_order.xpath("//SalesChannel").first.content
 
-        next if sales_channel != 'Amazon.com' || !['Partially Shipped', 'Shipped'].include?(order_status)
+        next if sales_channel != 'Amazon.com'
+
+        order_item_statuses = xml_order.xpath('//OrderItem').map{ |order_item| order_item.xpath('//ItemStatus').first.content }
+
+        # only include Shipped or Partially shipped orders
+        if order_status != 'Shipped'
+          if order_item_statuses.all?{ |status| status == 'Unshipped'}
+            puts "skipping order #{xml_order.css('AmazonOrderID').first.content}"
+            next
+          end
+        end
 
         # * Find all orders in a Shipped or Partially Shipped Status.
         # * Exclude Non-Amazon Sales Channel orders.
@@ -62,7 +76,17 @@ class Parser
         order[:order_status] = order_status
         order[:last_updated_date] = xml_order.xpath("//LastUpdatedDate").first.content
         order[:item_count] = xml_order.xpath("//OrderItem").count
+        order[:fullfillment_channel] = xml_order.xpath("//FulfillmentChannel").first.content
+        order[:shipping_service_level] = xml_order.xpath("//ShipServiceLevel").first.content
+        order[:total_paid] = 0.00 # there are not fields that seem to distinguish payment
         money_pieces = get_amounts_from_order_items(xml_order.xpath("//OrderItem"))
+
+        xml_address = xml_order.xpath('//FulfillmentData').first.xpath('//Address').first
+
+        order[:shipping_address] = "#{xml_address.xpath('//City').first.content}"
+        order[:shipping_address] << " #{xml_address.xpath('//State').first.content}, "
+        order[:shipping_address] << " #{xml_address.xpath('//PostalCode').first.content}"
+        order[:shipping_address] << " #{xml_address.xpath('//Country').first.content}"
 
         # TODO: calculate subtotal for all items in the order
         # order[:item_subtotal] = xml_order.xpath("//OrderItem").count
@@ -76,10 +100,11 @@ class Parser
           money_pieces[:subtotal].to_s,
           money_pieces[:tax].to_s,
           money_pieces[:shipping].to_s,
-          order[:discounts],
+          money_pieces[:shipping].to_s,
           order[:total_paid],
           order[:shipping_address],
-          order[:fullfillment_info]
+          order[:fullfillment_channel],
+          order[:shipping_service_level],
         ]
       end
     end
@@ -100,6 +125,7 @@ class Parser
     total_tax = 0.00
     total_shipping = 0.00
     total_subtotal = 0.00
+    total_discounts = 0.00
 
     order_items.each do |order_item|
       order_item_parser = OrderItemParser.new(order_item)
@@ -108,6 +134,7 @@ class Parser
       total_shipping =+ order_item_parser.shipping
       total_subtotal =+ order_item_parser.subtotal
       total_tax =+ order_item_parser.tax
+      total_discounts =+ order_item_parser.discount
     end
 
     { :subtotal => total_subtotal, :tax => total_tax, :shipping => total_shipping }
