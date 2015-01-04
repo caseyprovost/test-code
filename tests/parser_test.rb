@@ -13,5 +13,6 @@ class TestParser < Minitest::Test
 
     result = @parser.call
     assert File.exists?(result)
+    assert CSV.readlines(result).count == 22 # we know only 22 of the orders should show up in the CSV with the given constraints
   end
 end
